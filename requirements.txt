@@ -1,0 +1,7 @@
+Flask==3.1.0
+pandas==2.3.2
+numpy==2.0.2
+plotly==5.24.1
+pydantic==2.9.2
+pydantic-settings==2.6.1
+prometheus-client==0.21.0

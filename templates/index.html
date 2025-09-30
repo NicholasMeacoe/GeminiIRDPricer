@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js" defer></script>
+    <title>Interest Rate Swap Pricer</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="mt-5">Interest Rate Swap Pricer</h1>
+      <form method="post" class="mt-4">
+        <div class="form-row">
+          <div class="form-group col-md-4">
+            <label for="notional">Notional</label>
+            <input type="text" class="form-control" id="notional" name="notional" placeholder="e.g., 10m" value="{{ notional or '10m' }}" required pattern="^\\d+(\\.\\d+)?\s*[mkbMKByY]?$" title="Enter a number optionally followed by k, m, or b (e.g., 500k, 10m)">
+          </div>
+          <div class="form-group col-md-4">
+            <label for="fixed_rate">Fixed Rate (%)</label>
+            <input type="number" class="form-control" id="fixed_rate" name="fixed_rate" step="any" value="{{ fixed_rate or '' }}" required>
+          </div>
+          <div class="form-group col-md-4">
+            <label for="maturity_date">Maturity</label>
+            <input type="text" class="form-control" id="maturity_date" name="maturity_date" placeholder="e.g., 5y or 2028-12-31" value="{{ maturity_date or '5y' }}" required pattern="^(\d{4}-\d{2}-\d{2}|\d+\s*[ymdYMD])$" title="Enter an ISO date YYYY-MM-DD or a tenor like 5y, 24m, 30d">
+          </div>
+        </div>
+
+        <button type="submit" name="action" value="price" class="btn btn-primary">Price Swap</button>
+        <button type="submit" name="action" value="solve" class="btn btn-secondary">Solve</button>
+
+        {% if result %}
+          <div class="alert alert-success mt-4" role="alert">
+            {{ result }}
+          </div>
+        {% endif %}
+        {% if error %}
+          <div class="alert alert-danger mt-4" role="alert">
+            {{ error }}
+          </div>
+        {% endif %}
+        
+        <div class="mt-4">
+          <h3>Yield Curve</h3>
+          <div id="yieldCurveChart"></div>
+          <table class="table table-bordered table-sm mt-3">
+            <thead class="thead-light">
+              <tr>
+                <th>Maturity (Years)</th>
+                <th>Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for point in yield_curve %}
+              <tr>
+                <td><input type="number" step="any" class="form-control" name="curve_maturity" value="{{ point['Maturity (Years)'] }}" readonly></td>
+                <td><input type="number" step="any" class="form-control" name="curve_rate" value="{{ point.Rate }}"></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </form>
+
+      {% if schedule %}
+      <div class="mt-5">
+        <h3>Payment Schedule</h3>
+        <table class="table table-bordered table-sm">
+          <thead class="thead-light">
+            <tr>
+              <th>Payment Date</th>
+              <th>Days</th>
+              <th>Fixed Payment</th>
+              <th>Floating Payment</th>
+              <th>Discount Factor</th>
+              <th>Fixed PV</th>
+              <th>Floating PV</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in schedule %}
+            <tr>
+              <td>{{ payment.payment_date }}</td>
+              <td>{{ payment.days }}</td>
+              <td>{{ "{:,.2f}".format(payment.fixed_payment) }}</td>
+              <td>{{ "{:,.2f}".format(payment.floating_payment) }}</td>
+              <td>{{ "{:.6f}".format(payment.discount_factor) }}</td>
+              <td>{{ "{:,.2f}".format(payment.pv_fixed) }}</td>
+              <td>{{ "{:,.2f}".format(payment.pv_floating) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <script>
+      var plot_json = {{ plot_json|default('null')|safe }};
+      if (plot_json) {
+        try {
+          var plot_data = JSON.parse(plot_json);
+          if (typeof Plotly !== 'undefined' && Plotly.newPlot) {
+            Plotly.newPlot('yieldCurveChart', plot_data.data, plot_data.layout);
+          } else {
+            var el = document.getElementById('yieldCurveChart');
+            if (el) el.innerHTML = '<div class="alert alert-info">Chart not available (Plotly library not loaded). Data table is shown below.</div>';
+          }
+        } catch (e) {
+          console.error('Failed to render chart:', e);
+          var el2 = document.getElementById('yieldCurveChart');
+          if (el2) el2.innerHTML = '<div class="alert alert-warning">Chart rendering error. Data table is shown below.</div>';
+        }
+      }
+    </script>
+
+  </body>
+</html>

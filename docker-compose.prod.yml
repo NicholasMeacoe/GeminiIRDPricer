@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - ENV=production
+      - LOG_FORMAT=json
+      - LOG_LEVEL=INFO
+      - METRICS_ENABLED=true
+      - ENABLE_AUTH=true
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - API_USER=${API_USER}
+      - API_PASS=${API_PASS}
+      - CURVE_CACHE_TTL_SECONDS=600
+      - MAX_CONTENT_LENGTH=5000000
+    volumes:
+      - ./data:/app/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    restart: unless-stopped

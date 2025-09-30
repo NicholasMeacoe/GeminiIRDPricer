@@ -1,0 +1,337 @@
+import React, { useState, useEffect } from 'react';
+import './App.css';
+import YieldCurveChart from './components/YieldCurveChart';
+import Tabs from './components/Tabs';
+
+const API_BASE_URL = 'http://localhost:8000/api';
+
+interface YieldCurveData {
+  "Maturity (Years)": number;
+  Rate: number;
+  Date: string;
+}
+
+interface SwapFormData {
+  notional: string;
+  fixed_rate: number;
+  maturity_date: string;
+}
+
+function App() {
+  const [yieldCurve, setYieldCurve] = useState<YieldCurveData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [backendConnected, setBackendConnected] = useState(false);
+  const [paymentSchedule, setPaymentSchedule] = useState<any[]>([]);
+  const [plotData, setPlotData] = useState<any>(null);
+  
+  const [formData, setFormData] = useState<SwapFormData>({
+    notional: '10m',
+    fixed_rate: 4.5,
+    maturity_date: '5y'
+  });
+
+  // Load initial yield curve data with retry logic
+  useEffect(() => {
+    const loadYieldCurve = async (retries = 3) => {
+      try {
+        console.log('Attempting to connect to backend...');
+        const response = await fetch(`${API_BASE_URL}/yield-curve`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        setYieldCurve(data.yield_curve);
+        setPlotData(data.plot_data);
+        setBackendConnected(true);
+        console.log('Successfully loaded yield curve data');
+      } catch (err) {
+        console.error('Failed to load yield curve:', err);
+        
+        if (retries > 0) {
+          console.log(`Retrying in 2 seconds... (${retries} retries left)`);
+          setTimeout(() => loadYieldCurve(retries - 1), 2000);
+        } else {
+          setError(`Failed to connect to backend after multiple attempts. Please ensure the backend server is running on http://localhost:8000. Error: ${err}`);
+        }
+      }
+    };
+
+    loadYieldCurve();
+  }, []);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'fixed_rate' ? parseFloat(value) || 0 : value
+    }));
+  };
+
+  const handlePriceSwap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/price-swap`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to price swap');
+      }
+      
+      const data = await response.json();
+      setResult(`Swap Value: $${data.swap_value.toFixed(2)}`);
+      setPaymentSchedule(data.schedule || []);
+      setSuccess('Swap priced successfully!');
+    } catch (err) {
+      setError(`${err}`);
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSolveParRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/solve-par-rate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          notional: formData.notional,
+          maturity_date: formData.maturity_date
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to solve par rate');
+      }
+      
+      const data = await response.json();
+      setFormData(prev => ({ ...prev, fixed_rate: data.par_rate }));
+      setPaymentSchedule([]);
+      setSuccess(`Par rate solved: ${data.par_rate.toFixed(4)}%`);
+    } catch (err) {
+      setError(`${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="container">
+      <h1>Interest Rate Swap Pricer</h1>
+      <p>Price interest rate swaps and solve for par rates using yield curve data</p>
+      
+      {/* Backend Status */}
+      <div className={`status-indicator ${backendConnected ? 'status-connected' : 'status-disconnected'}`}>
+        <span>{backendConnected ? '🟢' : '🔴'}</span>
+        <span>Backend Status: {backendConnected ? 'Connected' : 'Disconnected'}</span>
+        {!backendConnected && <span className="loading-spinner"></span>}
+      </div>
+
+      {/* Alerts */}
+      {error && (
+        <div className="alert alert-error">
+          {error}
+          <button onClick={() => setError(null)} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>
+            ✕
+          </button>
+        </div>
+      )}
+      {success && (
+        <div className="alert alert-success">
+          {success}
+          <button onClick={() => setSuccess(null)} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Pricing Form */}
+      <div className="card">
+        <h2>🏦 Interest Rate Swap Parameters</h2>
+        <form>
+          <div className="grid">
+            <div className="form-group">
+              <label className="form-label" htmlFor="notional">Notional</label>
+              <input
+                type="text"
+                id="notional"
+                name="notional"
+                value={formData.notional}
+                onChange={handleInputChange}
+                placeholder="e.g., 10m"
+                className="form-input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="fixed_rate">Fixed Rate (%)</label>
+              <input
+                type="number"
+                id="fixed_rate"
+                name="fixed_rate"
+                value={formData.fixed_rate}
+                onChange={handleInputChange}
+                step="0.01"
+                className="form-input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="maturity_date">Maturity</label>
+              <input
+                type="text"
+                id="maturity_date"
+                name="maturity_date"
+                value={formData.maturity_date}
+                onChange={handleInputChange}
+                placeholder="e.g., 5y or 2028-12-31"
+                className="form-input"
+              />
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={handlePriceSwap}
+              disabled={loading || !backendConnected}
+              className="btn btn-primary"
+            >
+              {loading ? (
+                <>
+                  <span className="loading-spinner"></span>
+                  Pricing...
+                </>
+              ) : (
+                'Price Swap'
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSolveParRate}
+              disabled={loading || !backendConnected}
+              className="btn btn-secondary"
+            >
+              {loading ? (
+                <>
+                  <span className="loading-spinner"></span>
+                  Solving...
+                </>
+              ) : (
+                'Solve Par Rate'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Results */}
+      {result && (
+        <div className="card">
+          <h2>📊 Calculation Results</h2>
+          <div className="alert alert-success">
+            <strong>{result}</strong>
+          </div>
+          {paymentSchedule.length > 0 && (
+            <div style={{ marginTop: '1rem', color: '#94a3b8' }}>
+              <p>💡 <strong>Fixed vs Floating:</strong> {paymentSchedule.length} payment periods calculated</p>
+              <p>📅 <strong>Payment Frequency:</strong> Semi-annual (every 6 months)</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Yield Curve */}
+      <div className="card">
+        <h2>📈 Yield Curve Data</h2>
+        {plotData && (
+          <YieldCurveChart plotData={plotData} className="chart-container" />
+        )}
+        {yieldCurve.length > 0 ? (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Maturity (Years)</th>
+                <th>Rate (%)</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yieldCurve.map((point, index) => (
+                <tr key={index}>
+                  <td>{point["Maturity (Years)"]}</td>
+                  <td className="text-right">{point.Rate.toFixed(4)}</td>
+                  <td>{new Date(point.Date).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>Loading yield curve data...</p>
+        )}
+      </div>
+
+      {/* Payment Schedule */}
+      {paymentSchedule.length > 0 && (
+        <div className="card">
+          <h2>📋 Payment Schedule - Fixed vs Floating Legs</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Payment Date</th>
+                <th>Days</th>
+                <th className="text-right">Fixed Payment</th>
+                <th className="text-right">Floating Payment</th>
+                <th className="text-right">Discount Factor</th>
+                <th className="text-right">Fixed PV</th>
+                <th className="text-right">Floating PV</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paymentSchedule.map((payment, index) => (
+                <tr key={index}>
+                  <td>{payment.payment_date}</td>
+                  <td>{payment.days}</td>
+                  <td className="text-right">${payment.fixed_payment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="text-right">${payment.floating_payment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="text-right">{payment.discount_factor.toFixed(6)}</td>
+                  <td className="text-right">${payment.pv_fixed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="text-right">${payment.pv_floating.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

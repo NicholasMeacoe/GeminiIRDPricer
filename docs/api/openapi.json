@@ -1,0 +1,13 @@
+{
+  "info": {
+    "title": "Gemini IRD Pricer API",
+    "version": "1.0.0",
+    "description": "Snapshot placeholder. Regenerate from running FastAPI app at /openapi.json."
+  },
+  "paths": {
+    "/api/yield-curve": {"get": {"summary": "Get current yield curve"}},
+    "/api/price-swap": {"post": {"summary": "Price a swap"}},
+    "/api/solve-par-rate": {"post": {"summary": "Solve par rate"}},
+    "/api/health": {"get": {"summary": "Health check"}}
+  }
+}

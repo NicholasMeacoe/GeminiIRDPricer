@@ -1,0 +1,16 @@
+version: '3.9'
+services:
+  pricer:
+    build: .
+    image: gemini-ird-pricer:local
+    environment:
+      - ENV=production
+      - ENABLE_AUTH=false
+      - LOG_FORMAT=json
+      - PORT=5000
+      - METRICS_ENABLED=true
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
