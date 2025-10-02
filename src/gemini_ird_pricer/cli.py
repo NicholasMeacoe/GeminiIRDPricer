@@ -4,93 +4,84 @@ import json
 from .parsing import parse_maturity_date, load_yield_curve
 from .pricer import price_swap, solve_par_rate
 from .utils import find_curve_file
-from .config import BaseConfig
+from .config import get_config
 
 
+def main() -> int:
+    """CLI entry point for Gemini IRD Pricer."""
+    parser = argparse.ArgumentParser(
+        description="Gemini IRD Pricer CLI - Price interest rate swaps"
+    )
+    parser.add_argument("--notional", type=str, help="Notional amount (e.g., 10m, 1000000)")
+    parser.add_argument("--maturity", type=str, help="Maturity (e.g., 5y, 2028-12-31)")
+    parser.add_argument("--fixed", type=float, help="Fixed rate in percent (for pricing)")
+    parser.add_argument("--data-dir", type=str, help="Override data directory")
+    parser.add_argument("--config", action="store_true", help="Print configuration")
+    parser.add_argument("--version", action="store_true", help="Print version")
 
+    args = parser.parse_args()
 
-def main(argv: list[str] | None = None) -> int:
-    import sys
-    parser = argparse.ArgumentParser(prog="gemini-ird-pricer", description="IR swap pricing CLI")
-    parser.add_argument("price", nargs="?", help="Price a swap", default="price")
-    parser.add_argument("--notional", required=False, default="1m")
-    parser.add_argument("--maturity", required=False, default="5y")
-    parser.add_argument("--fixed", required=False, help="Fixed rate in %% (omit to solve par rate)", type=float)
-    parser.add_argument("--data-dir", required=False)
-    parser.add_argument("--version", action="store_true", help="Show version and exit")
-    parser.add_argument("--config", action="store_true", help="Print resolved config as JSON and exit")
     try:
-        # Normalize argv and handle help explicitly to avoid SystemExit confusing return codes
-        if argv is None:
-            argv = sys.argv[1:]
-        # If help requested, print and exit 0
-        if any(a in ("-h", "--help") for a in argv):
-            parser.print_help()
-            return 0
-        # Workaround: allow negative-looking maturity like "-5y" as value by joining with the flag
-        _argv = list(argv)
-        for i, tok in enumerate(list(_argv)):
-            if tok == "--maturity" and i + 1 < len(_argv):
-                _argv[i] = f"--maturity={_argv[i+1]}"
-                del _argv[i+1]
-                break
-        # Be tolerant of unknown positional subcommands (e.g., 'price')
-        args, _unknown = parser.parse_known_args(_argv)
-
-        # Handle meta flags
         if args.version:
-            from .version import __version__
-            print(__version__)
+            try:
+                from .version import __version__
+                print(f"Gemini IRD Pricer v{__version__}")
+            except ImportError:
+                print("Gemini IRD Pricer v0.1.0")
             return 0
+        
         if args.config:
-            cfg = BaseConfig.from_env()
+            cfg = get_config()
             print(json.dumps(cfg.model_dump(), indent=2))
             return 0
 
-        try:
-            cfg = BaseConfig.from_env()
-            if args.data_dir:
-                cfg.DATA_DIR = args.data_dir
-                # If user explicitly provided a data dir, require a match and do not fallback
-                import glob, os
-                matches = glob.glob(os.path.join(cfg.DATA_DIR, cfg.CURVE_GLOB))
-                if not matches:
-                    raise FileNotFoundError(f"No curve files found in {cfg.DATA_DIR} matching {cfg.CURVE_GLOB}")
-            curve_file = find_curve_file(cfg)
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 2
-        try:
-            yc = load_yield_curve(curve_file)
-        except Exception as e:
-            print(f"Error: failed to load curve: {e}", file=sys.stderr)
-            return 3
-        try:
-            mdate = parse_maturity_date(args.maturity)
-        except Exception as e:
-            print(f"Error: invalid maturity '{args.maturity}': {e}", file=sys.stderr)
-            return 4
+        if not args.notional or not args.maturity:
+            parser.print_help()
+            return 1
 
-        if args.fixed is None:
-            par = solve_par_rate(1_000_000.0, mdate, yc)
-            print(f"Par rate: {par*100:.4f}%")
+        try:
+            cfg = get_config()
+            config_dict = cfg.model_dump()
+            
+            if args.data_dir:
+                config_dict["DATA_DIR"] = args.data_dir
+
+            file_path = find_curve_file(config_dict)
+            yield_curve = load_yield_curve(file_path)
+
+            if args.fixed is not None:
+                # Price the swap
+                notional = float(args.notional.replace('m', '000000').replace('k', '000'))
+                maturity_date = parse_maturity_date(args.maturity)
+                fixed_rate = args.fixed / 100.0
+                
+                npv, schedule = price_swap(notional, fixed_rate, maturity_date, yield_curve, config_dict)
+                
+                print(f"Swap NPV: {npv:,.2f}")
+                print(f"Notional: {notional:,.0f}")
+                print(f"Fixed Rate: {args.fixed:.2f}%")
+                print(f"Maturity: {args.maturity}")
+            else:
+                # Solve for par rate
+                notional = float(args.notional.replace('m', '000000').replace('k', '000'))
+                maturity_date = parse_maturity_date(args.maturity)
+                
+                par_rate = solve_par_rate(notional, maturity_date, yield_curve, config_dict)
+                
+                print(f"Par Rate: {par_rate * 100:.4f}%")
+                print(f"Notional: {notional:,.0f}")
+                print(f"Maturity: {args.maturity}")
+
             return 0
 
-        try:
-            fixed_rate = float(args.fixed) / 100.0
         except Exception as e:
-            print(f"Error: invalid fixed rate '{args.fixed}': {e}", file=sys.stderr)
-            return 5
-        value, _ = price_swap(1_000_000.0, fixed_rate, mdate, yc)
-        print(f"Swap NPV: {value:,.2f}")
-        return 0
-    except SystemExit as se:
-        # argparse uses SystemExit for usage errors
-        code = int(getattr(se, "code", 2) or 2)
-        if code != 0:
-            print("Error: invalid arguments", file=sys.stderr)
-        return code
+            print(f"Error: {e}")
+            return 1
+
+    except KeyboardInterrupt:
+        print("\nInterrupted")
+        return 130
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit(main())
